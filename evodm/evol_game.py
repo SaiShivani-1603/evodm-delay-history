@@ -36,9 +36,18 @@ class evol_env:
                         starting_genotype = 0, 
                         dense= False, cs = False, 
                         delay = 0,
-                        seascapes = False):
+                        seascapes = False,
+                        obs_delay = 0):
         #define switch for whether to record the state vector or fitness for the learner
         self.TRAIN_INPUT = train_input
+        # --- delayed-observation modes (added for the delay-history study; see CHANGES.md) ---
+        # delayed_state   : agent sees only the genotype distribution from obs_delay steps ago
+        # delayed_history : the same, plus the one-hot drugs given since that stale reading
+        # delayed_decoy   : the same input size as delayed_history, but the drug slots hold
+        #                   uniformly random drugs (control: no real information)
+        self.OBS_MODES = ("delayed_state", "delayed_history", "delayed_decoy")
+        self.OBS_MODE = train_input in self.OBS_MODES
+        self.OBS_DELAY = int(obs_delay)
         #define environmental variables
         self.update_target_counter = 0
         self.time_step = 0 #define for number of evolutionary steps counter
@@ -108,6 +117,10 @@ class evol_env:
             self.state_vector[starting_genotype][0] = 1
 
         self.update_state_mem(state_vector = self.state_vector)
+        if self.OBS_MODE:
+            self.state_hist = [np.array(self.state_vector).ravel().copy()]
+            self.action_hist = []
+            self.cur_obs = self.build_obs()
 
         ##Define initial fitness
         self.fitness = [np.dot(self.drugs[self.action-1], self.state_vector)]
@@ -123,6 +136,10 @@ class evol_env:
             self.ENVIRONMENT_SHAPE = (num_drugs + self.NUM_EVOLS,)
         elif self.TRAIN_INPUT == "pop_size":
             self.ENVIRONMENT_SHAPE = (self.NUM_OBS, 1)
+        elif self.TRAIN_INPUT == "delayed_state":
+            self.ENVIRONMENT_SHAPE = (2**N,)
+        elif self.TRAIN_INPUT in ("delayed_history", "delayed_decoy"):
+            self.ENVIRONMENT_SHAPE = (2**N + self.OBS_DELAY * num_drugs,)
         else:
             print("please specify state_vector, pop_size, or fitness for train_input when initializing the environment")
             return
@@ -198,6 +215,9 @@ class evol_env:
         
         
         self.update_state_mem(state_vector = state_vector)
+        if self.OBS_MODE:
+            self.state_hist.append(np.array(state_vector).ravel().copy())
+            self.action_hist.append(int(self.action))
 
         if self.NOISE_BOOL:
             sensor_fitness = self.add_noise(fitness)
@@ -221,6 +241,29 @@ class evol_env:
         #done
         return
     
+    def build_obs(self):
+        """Observation the agent gets at decision time in the delayed-observation modes.
+
+        t actions have been taken so far, so the true state is s_t. The agent only sees the
+        stale state s_(t-d) (clipped to s_0 early in an episode). For delayed_history it also
+        sees the d actions a_(t-d+1) ... a_t taken since that reading, oldest first, as one-hot
+        vectors, left-padded with zeros when fewer than d actions exist yet.
+        """
+        t = len(self.action_hist)
+        d = self.OBS_DELAY
+        idx = max(0, t - d)
+        parts = [self.state_hist[idx]]
+        if self.TRAIN_INPUT in ("delayed_history", "delayed_decoy"):
+            slots = np.zeros((d, self.num_drugs))
+            if self.TRAIN_INPUT == "delayed_history":
+                recent = self.action_hist[idx:t]
+            else:  # decoy: random drugs, same count as the real window, no information
+                recent = [random.randint(1, self.num_drugs) for _ in range(t - idx)]
+            for k, a in enumerate(recent):
+                slots[d - len(recent) + k, a - 1] = 1.0
+            parts.append(slots.ravel())
+        return np.concatenate(parts).astype(float)
+
     def update_state_mem(self, state_vector):
         if self.DELAY >0:
             if self.TRAIN_INPUT == "fitness":
@@ -235,6 +278,11 @@ class evol_env:
         # if self.delay > 0, this list will look like:
         # [s_{t-delay}, a_t, r_t, s_{t-delay+1}]
 
+        if self.OBS_MODE:
+            new_obs = self.build_obs()
+            self.sensor = [self.cur_obs, self.action, self.calc_reward(fitness = fitness), new_obs]
+            self.cur_obs = new_obs
+            return
         if self.DELAY > 0 and len(self.state_mem) <= self.DELAY+1:
             return              
         if self.TRAIN_INPUT == "state_vector":
@@ -387,6 +435,11 @@ class evol_env:
         else:
             self.state_vector  = np.zeros((2**self.N,1))
             self.state_vector[self.STARTING_GENOTYPE][0] = 1
+
+        if self.OBS_MODE:
+            self.state_hist = [np.array(self.state_vector).ravel().copy()]
+            self.action_hist = []
+            self.cur_obs = self.build_obs()
 
         #reset time step
         self.time_step=0

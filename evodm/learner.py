@@ -66,6 +66,7 @@ class hyperparameters:
         self.UPDATE_TARGET_EVERY = 310 #every 500 steps, update the target
         self.TRAIN_INPUT = "state_vector"
         self.DELAY = 0
+        self.OBS_DELAY = 0 #delayed-observation modes (delayed_state / delayed_history / delayed_decoy)
         
         # Exploration settings
         self.DISCOUNT = 0.99  
@@ -156,6 +157,7 @@ class DrugSelector:
                                 total_resistance= self.hp.TOTAL_RESISTANCE,
                                 dense=self.hp.DENSE,
                                 delay=self.hp.DELAY, 
+                                obs_delay=self.hp.OBS_DELAY,
                                 phenom=self.hp.PHENOM)
 
         # main model  # gets trained every step
@@ -181,7 +183,7 @@ class DrugSelector:
             model.add(Conv1D(64, 3, activation="relu"))
             model.add(MaxPooling1D(pool_size=2))
             model.add(Flatten())
-        elif self.hp.TRAIN_INPUT == "fitness":
+        elif self.hp.TRAIN_INPUT in ("fitness", "delayed_state", "delayed_history", "delayed_decoy"):
             #have to change the kernel size because of the weird difference in environment shape
             model.add(Dense(64, activation="relu",
                          input_shape=self.env.ENVIRONMENT_SHAPE))
@@ -365,6 +367,8 @@ class DrugSelector:
             tens = sensor.reshape(-1, *self.env.ENVIRONMENT_SHAPE)
         elif self.hp.TRAIN_INPUT == "pop_size":
             tens = self.env.pop_size.reshape(-1, *self.env.ENVIRONMENT_SHAPE)
+        elif self.hp.TRAIN_INPUT in ("delayed_state", "delayed_history", "delayed_decoy"):
+            tens = np.array(self.env.cur_obs).reshape(-1, *self.env.ENVIRONMENT_SHAPE)
         else: 
             return "error in get_qs()"
 
