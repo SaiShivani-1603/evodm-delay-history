@@ -1,0 +1,9 @@
+Fri 27 Nov 2026 21:29:24 GMT
+ProductName:		macOS
+ProductVersion:		27.2.1
+BuildVersion:		26B131
+      Model Name: MacBook Air
+      Chip: Apple M1
+      Memory: 8 GB
+Python 3.9.25
+9b1ffeac91fc0c0e7a227f8460cba55f29900b68
