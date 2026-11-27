@@ -1,0 +1,16 @@
+{
+  "id": "main_decoy_d3_s13",
+  "mode": "decoy",
+  "delay": 3,
+  "seed": 13,
+  "episodes": 500,
+  "train_freq": 1,
+  "eval_episodes": 50,
+  "eval_stale": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ]
+}

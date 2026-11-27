@@ -47,7 +47,9 @@ class evol_env:
         #                   uniformly random drugs (control: no real information)
         self.OBS_MODES = ("delayed_state", "delayed_history", "delayed_decoy")
         self.OBS_MODE = train_input in self.OBS_MODES
-        self.OBS_DELAY = int(obs_delay)
+        self.OBS_DELAY = int(obs_delay)   # delay the agent was built for: sets the drug-window length
+        self.OBS_STALE = int(obs_delay)   # how stale the reading actually is; differs from OBS_DELAY only
+                                          # in the mismatched-delay evaluation (see evodm/evaluate.py)
         #define environmental variables
         self.update_target_counter = 0
         self.time_step = 0 #define for number of evolutionary steps counter
@@ -245,22 +247,27 @@ class evol_env:
         """Observation the agent gets at decision time in the delayed-observation modes.
 
         t actions have been taken so far, so the true state is s_t. The agent only sees the
-        stale state s_(t-d) (clipped to s_0 early in an episode). For delayed_history it also
-        sees the d actions a_(t-d+1) ... a_t taken since that reading, oldest first, as one-hot
-        vectors, left-padded with zeros when fewer than d actions exist yet.
+        stale state s_(t-k) (clipped to s_0 early in an episode), where k = OBS_STALE is the
+        real staleness. For delayed_history it also sees the drugs given since that reading,
+        a_(t-k+1) ... a_t, oldest first, as one-hot vectors in a window of fixed length
+        W = OBS_DELAY (the delay the network was built for), left-padded with zeros. When
+        k == W (training, and matched evaluation) the window holds exactly the drugs given
+        since the reading. In the mismatched-delay evaluation k can differ from W: if k > W the
+        oldest k - W drugs fall outside the window; if k < W the window is left-padded with zeros.
         """
         t = len(self.action_hist)
-        d = self.OBS_DELAY
-        idx = max(0, t - d)
+        w = self.OBS_DELAY
+        idx = max(0, t - self.OBS_STALE)
         parts = [self.state_hist[idx]]
         if self.TRAIN_INPUT in ("delayed_history", "delayed_decoy"):
-            slots = np.zeros((d, self.num_drugs))
+            slots = np.zeros((w, self.num_drugs))
+            n_real = min(t - idx, w)  # number of drugs that fit in the window
             if self.TRAIN_INPUT == "delayed_history":
-                recent = self.action_hist[idx:t]
+                recent = self.action_hist[idx:t][-n_real:] if n_real > 0 else []
             else:  # decoy: random drugs, same count as the real window, no information
-                recent = [random.randint(1, self.num_drugs) for _ in range(t - idx)]
-            for k, a in enumerate(recent):
-                slots[d - len(recent) + k, a - 1] = 1.0
+                recent = [random.randint(1, self.num_drugs) for _ in range(n_real)]
+            for j, a in enumerate(recent):
+                slots[w - len(recent) + j, a - 1] = 1.0
             parts.append(slots.ravel())
         return np.concatenate(parts).astype(float)
 

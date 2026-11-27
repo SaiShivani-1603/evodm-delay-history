@@ -1,0 +1,16 @@
+{
+  "id": "main_history_d3_s12",
+  "mode": "history",
+  "delay": 3,
+  "seed": 12,
+  "episodes": 500,
+  "train_freq": 1,
+  "eval_episodes": 50,
+  "eval_stale": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ]
+}

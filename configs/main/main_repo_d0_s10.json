@@ -1,0 +1,16 @@
+{
+  "id": "main_repo_d0_s10",
+  "mode": "repo",
+  "delay": 0,
+  "seed": 10,
+  "episodes": 500,
+  "train_freq": 1,
+  "eval_episodes": 50,
+  "eval_stale": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ]
+}
