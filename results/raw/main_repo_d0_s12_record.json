@@ -1,0 +1,37 @@
+{
+  "id": "main_repo_d0_s12",
+  "config": {
+    "id": "main_repo_d0_s12",
+    "mode": "repo",
+    "delay": 0,
+    "seed": 12,
+    "episodes": 500,
+    "train_freq": 1,
+    "eval_episodes": 50,
+    "eval_stale": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "started_utc": "2026-11-28T03:16:32+00:00",
+  "seconds_train": 1481.8,
+  "seconds_eval": 39.8,
+  "git_commit": "5f0550f43e0750bb03c9298f031e3c085cff5530",
+  "git_dirty": true,
+  "python": "3.9.25",
+  "tensorflow": "2.11.0",
+  "numpy": "1.23.5",
+  "pandas": "2.3.3",
+  "platform": "macOS-27.2.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "cpu_count": 8,
+  "summary": {
+    "DP_staleNA": 0.0432,
+    "RL_staletrain": 0.2565,
+    "naive_staleNA": 0.6197,
+    "train_last50_RL": 0.2582
+  }
+}
