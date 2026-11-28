@@ -2,7 +2,7 @@
 # we are taking inspiration (and in some cases borrowing heavily) from the following
 # tutorial: https://pythonprogramming.net/training-deep-q-learning-dqn-reinforcement-learning-python-tutorial/?completed=/deep-q-learning-dqn-reinforcement-learning-python-tutorial/
 from tensorflow.keras.models import Sequential, Model
-from tensorflow.keras.layers import Dense, Dropout, Conv1D, MaxPooling1D, Flatten
+from tensorflow.keras.layers import Dense, Dropout, Conv1D, MaxPooling1D, Flatten, Reshape
 from tensorflow.keras.optimizers import Adam
 from tensorflow.python.keras.layers import deserialize, serialize
 from tensorflow.python.keras.saving import saving_utils
@@ -67,6 +67,7 @@ class hyperparameters:
         self.TRAIN_INPUT = "state_vector"
         self.DELAY = 0
         self.OBS_DELAY = 0 #delayed-observation modes (delayed_state / delayed_history / delayed_decoy)
+        self.NETWORK = "dense" #"dense" or "conv": front end for the delayed-observation modes only
         
         # Exploration settings
         self.DISCOUNT = 0.99  
@@ -180,6 +181,16 @@ class DrugSelector:
         if self.hp.TRAIN_INPUT == "state_vector":
             model.add(Conv1D(64, 3, activation="relu",
                          input_shape=self.env.ENVIRONMENT_SHAPE))
+            model.add(Conv1D(64, 3, activation="relu"))
+            model.add(MaxPooling1D(pool_size=2))
+            model.add(Flatten())
+        elif (self.hp.TRAIN_INPUT in ("delayed_state", "delayed_history", "delayed_decoy")
+              and self.hp.NETWORK == "conv"):
+            #same convolutional front end as the repository's state_vector agent, applied to the
+            #flat observation (genotype one-hot, plus the drug window for history/decoy)
+            model.add(Reshape((self.env.ENVIRONMENT_SHAPE[0], 1),
+                              input_shape=self.env.ENVIRONMENT_SHAPE))
+            model.add(Conv1D(64, 3, activation="relu"))
             model.add(Conv1D(64, 3, activation="relu"))
             model.add(MaxPooling1D(pool_size=2))
             model.add(Flatten())

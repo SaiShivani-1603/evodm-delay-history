@@ -3,7 +3,8 @@
 usage: python run_experiment.py configs/main/main_history_d2_s10.json [--force]
 
 Config keys: id, mode (repo | state | history | decoy), delay, seed, episodes, train_freq,
-eval_episodes, eval_stale (list; ignored for mode repo).
+eval_episodes, eval_stale (list; ignored for mode repo), network (dense | conv; optional,
+default dense; delayed-observation modes only).
 
 Writes, under results/raw/:
   <id>.csv          per-episode mean fitness during training (columns episode, RL, naive, DP)
@@ -53,7 +54,8 @@ def main(path, force=False):
     if mode == "repo":
         kw.update(train_input="state_vector", delay=delay)
     else:
-        kw.update(train_input="delayed_" + mode, obs_delay=delay, delay=0)
+        kw.update(train_input="delayed_" + mode, obs_delay=delay, delay=0,
+                  network=cfg.get("network", "dense"))
 
     start = datetime.now(timezone.utc).isoformat(timespec="seconds")
     t0 = time.time()

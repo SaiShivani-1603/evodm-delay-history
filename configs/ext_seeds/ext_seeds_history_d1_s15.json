@@ -1,0 +1,17 @@
+{
+  "id": "ext_seeds_history_d1_s15",
+  "mode": "history",
+  "delay": 1,
+  "seed": 15,
+  "episodes": 500,
+  "train_freq": 1,
+  "eval_episodes": 50,
+  "eval_stale": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "network": "dense"
+}

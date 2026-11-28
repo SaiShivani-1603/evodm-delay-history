@@ -23,6 +23,9 @@ upstream licence file and is released under GPL-3.0. Everything not listed here 
 - `evodm/test/test_delay_obs.py`, `evodm/test/test_mismatch_eval.py`: tests for the new code.
 - `REPRODUCTION.md`, `DESIGN_FREEZE.md`, `EXPERIMENTS.md`, `CHANGES.md`: documentation.
 
+- `learner.py`, `exp.py`: optional `network="conv"` front end (Reshape plus the repository agent's two Conv1D layers) for the delayed-observation modes; default stays Dense. Test: `evodm/test/test_network_option.py`.
+- `scripts/make_extension_configs.py`: configurations for the extension experiments E1 to E3.
+
 ## Not changed
 The evolutionary simulator, the landscapes, the Q-learning update, the replay and exploration logic, the
 exact optimum (backward induction) and the random policy.

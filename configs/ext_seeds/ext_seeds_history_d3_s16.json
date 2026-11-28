@@ -1,0 +1,17 @@
+{
+  "id": "ext_seeds_history_d3_s16",
+  "mode": "history",
+  "delay": 3,
+  "seed": 16,
+  "episodes": 500,
+  "train_freq": 1,
+  "eval_episodes": 50,
+  "eval_stale": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "network": "dense"
+}

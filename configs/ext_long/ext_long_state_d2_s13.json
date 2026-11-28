@@ -1,0 +1,17 @@
+{
+  "id": "ext_long_state_d2_s13",
+  "mode": "state",
+  "delay": 2,
+  "seed": 13,
+  "episodes": 1500,
+  "train_freq": 1,
+  "eval_episodes": 50,
+  "eval_stale": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "network": "dense"
+}

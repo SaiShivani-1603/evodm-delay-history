@@ -1,0 +1,17 @@
+{
+  "id": "ext_long_repo_d0_s13",
+  "mode": "repo",
+  "delay": 0,
+  "seed": 13,
+  "episodes": 1500,
+  "train_freq": 1,
+  "eval_episodes": 50,
+  "eval_stale": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "network": "dense"
+}

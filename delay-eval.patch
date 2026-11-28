@@ -1,0 +1,1994 @@
+diff --git a/CHANGES.md b/CHANGES.md
+new file mode 100644
+index 0000000..c46ed87
+--- /dev/null
++++ b/CHANGES.md
+@@ -0,0 +1,28 @@
++# Changes relative to the upstream code
++
++Upstream: https://github.com/DavisWeaver/evo_dm, commit `d975114` (GPL-3.0). This fork keeps the
++upstream licence file and is released under GPL-3.0. Everything not listed here is unchanged upstream code.
++
++## Modified upstream files
++- `evodm/evol_game.py`: new `obs_delay` argument and three `train_input` modes (`delayed_state`,
++  `delayed_history`, `delayed_decoy`); histories of states and drugs; `build_obs()`; `OBS_STALE`
++  (real staleness of the reading, separate from `OBS_DELAY`, the window length the network was built for);
++  new input shapes; replay tuples built from the delayed observation in `define_sensor`.
++- `evodm/learner.py`: `OBS_DELAY` hyperparameter passed to the environment; the Dense network
++  is used for the new modes; `get_qs` reads the current observation for the new modes.
++- `evodm/exp.py`: `obs_delay` argument of `evol_deepmind`.
++
++## New files (mine)
++- `evodm/evaluate.py`: greedy evaluation of a trained agent (no exploration, no learning), with
++  optional mismatched staleness, and evaluation of the random and exact-optimum reference policies.
++- `run_experiment.py`: runs one experiment from a configuration file and writes the raw results and a run record.
++- `run_baseline.py`: earlier command-line runner, used for the pilot runs (results `baseline_*`, `state_*`,
++  `history_*`, `decoy_*` with `_ep200_` or `_ep500_` in their names); kept for traceability.
++- `scripts/make_configs.py`, `scripts/run_all.sh`: build and run every configuration.
++- `configs/main/`: one configuration file per experiment in the paper.
++- `evodm/test/test_delay_obs.py`, `evodm/test/test_mismatch_eval.py`: tests for the new code.
++- `REPRODUCTION.md`, `DESIGN_FREEZE.md`, `EXPERIMENTS.md`, `CHANGES.md`: documentation.
++
++## Not changed
++The evolutionary simulator, the landscapes, the Q-learning update, the replay and exploration logic, the
++exact optimum (backward induction) and the random policy.
+diff --git a/DESIGN_FREEZE.md b/DESIGN_FREEZE.md
+new file mode 100644
+index 0000000..07a53e3
+--- /dev/null
++++ b/DESIGN_FREEZE.md
+@@ -0,0 +1,50 @@
++# Design freeze (written before any main run)
++
++DRAFT: Sai to read, edit and commit this file before starting `scripts/run_all.sh`. After the first main run,
++only typos may change; anything else is recorded as a deviation at the end of this file.
++
++## Question
++When the genotype reading is delayed, does telling the agent which drugs were given since that reading
++restore performance, and is the benefit specific to the real drug record?
++
++## Conditions (all use the same untuned hyperparameters, 500 episodes, `train_freq=1`)
++- `state`: sees only the stale genotype distribution (control for the contribution).
++- `history`: stale genotype plus the drugs given since (contribution).
++- `decoy`: stale genotype plus random drugs, same input size as `history` (control for input size).
++- `state` at delay 0: the no-delay reference with the same Dense network.
++- `repo` at delay 0: the repository's own Conv1D agent at the same budget (matched-budget reproduction).
++- Delays 1, 2 and 3. Reference policies: random drugs and the exact optimum, evaluated on the same protocol.
++
++## Seeds
++Seeds 10 to 14 for every condition; seeds 15 to 17 are added for the delay-2 conditions only.
++Seeds 0 to 4 were used in pilots and are not reused.
++
++## Primary outcome
++Mean fitness over 50 greedy evaluation episodes at the training delay (no exploration, no learning), per
++run; lower is better. Secondary: share of the optimum's benefit retained, (naive minus RL) / (naive minus DP).
++
++## Hypotheses and decision rules (95% t-intervals on paired differences, pairing by seed)
++- H1: at delays 2 and 3, history minus state is at most -0.15 and the interval excludes zero.
++  (Delay 2 uses seeds 10 to 17, t = 2.365 with 7 degrees of freedom; delay 3 uses seeds 10 to 14, t = 2.776 with 4.)
++- H2: at delays 2 and 3, history minus decoy is at most -0.10 and the interval excludes zero.
++- H3: for a history agent trained at delay 2 and evaluated at staleness 1 and 3, history minus state (same
++  training delay, same test staleness) is at most -0.10 with the interval excluding zero.
++- Delay 1 is exploratory: reported with intervals, with no threshold.
++A hypothesis that misses its threshold is reported as not supported. No threshold is changed after the runs.
++
++## Secondary analyses (stated in advance)
++- Learning curves for every condition (training fitness per episode block).
++- What each agent learns: drug-use frequencies, action entropy, and agreement with the exact optimal policy,
++  computed from the logged actions.
++- Dense versus Conv1D at delay 0, reported as a limitation.
++
++## Alternative explanations to test
++Input size (decoy), too little training (learning curves), fewer stored transitions in the repository's own
++delay option, seed variation (intervals and per-seed points).
++
++## Compute
++About 64 runs. One 500-episode run plus evaluation takes about 6 to 7 minutes in a batch of four on the
++M1 MacBook Air (8 GB), so about 7 hours in total. To be measured and recorded.
++
++## Deviations
++(none yet)
+diff --git a/EXPERIMENTS.md b/EXPERIMENTS.md
+new file mode 100644
+index 0000000..29e8804
+--- /dev/null
++++ b/EXPERIMENTS.md
+@@ -0,0 +1,18 @@
++# Running the experiments
++
++All commands run from the repository root in the conda environment `antibio` (Python 3.9, TensorFlow 2.11;
++exact versions in `environment.yml` and `requirements-frozen.txt`).
++
++1. Install: `python -m pip install -e .`
++2. Tests: `python -m pytest evodm/test -q --deselect evodm/test/test_evol_game.py::test_init_dense`
++3. Write the configuration files (already committed): `python scripts/make_configs.py`
++4. Run one experiment: `python run_experiment.py configs/main/main_history_d2_s10.json`
++5. Run all of them, 4 in parallel (finished runs are skipped): `caffeinate -i scripts/run_all.sh`
++
++Each run writes to `results/raw/`: `<id>.csv` (per-episode fitness during training), `<id>_eval.csv`
++(greedy evaluation on fresh episodes) and `<id>_record.json` (configuration, git commit, software versions,
++hardware, compute time). Logs go to `logs/`.
++
++Modes: `repo` = the repository's own agent (Conv1D, true current state); `state` = stale genotype only;
++`history` = stale genotype plus the drugs given since; `decoy` = stale genotype plus random drugs
++(same input size as `history`). Delay and seed are in the configuration file.
+diff --git a/configs/main/main_decoy_d1_s10.json b/configs/main/main_decoy_d1_s10.json
+new file mode 100644
+index 0000000..39f2e3c
+--- /dev/null
++++ b/configs/main/main_decoy_d1_s10.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d1_s10",
++  "mode": "decoy",
++  "delay": 1,
++  "seed": 10,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d1_s11.json b/configs/main/main_decoy_d1_s11.json
+new file mode 100644
+index 0000000..7cdcf12
+--- /dev/null
++++ b/configs/main/main_decoy_d1_s11.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d1_s11",
++  "mode": "decoy",
++  "delay": 1,
++  "seed": 11,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d1_s12.json b/configs/main/main_decoy_d1_s12.json
+new file mode 100644
+index 0000000..c44289e
+--- /dev/null
++++ b/configs/main/main_decoy_d1_s12.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d1_s12",
++  "mode": "decoy",
++  "delay": 1,
++  "seed": 12,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d1_s13.json b/configs/main/main_decoy_d1_s13.json
+new file mode 100644
+index 0000000..6661e91
+--- /dev/null
++++ b/configs/main/main_decoy_d1_s13.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d1_s13",
++  "mode": "decoy",
++  "delay": 1,
++  "seed": 13,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d1_s14.json b/configs/main/main_decoy_d1_s14.json
+new file mode 100644
+index 0000000..d2bf854
+--- /dev/null
++++ b/configs/main/main_decoy_d1_s14.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d1_s14",
++  "mode": "decoy",
++  "delay": 1,
++  "seed": 14,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d2_s10.json b/configs/main/main_decoy_d2_s10.json
+new file mode 100644
+index 0000000..5512a98
+--- /dev/null
++++ b/configs/main/main_decoy_d2_s10.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d2_s10",
++  "mode": "decoy",
++  "delay": 2,
++  "seed": 10,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d2_s11.json b/configs/main/main_decoy_d2_s11.json
+new file mode 100644
+index 0000000..2d000ee
+--- /dev/null
++++ b/configs/main/main_decoy_d2_s11.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d2_s11",
++  "mode": "decoy",
++  "delay": 2,
++  "seed": 11,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d2_s12.json b/configs/main/main_decoy_d2_s12.json
+new file mode 100644
+index 0000000..1610401
+--- /dev/null
++++ b/configs/main/main_decoy_d2_s12.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d2_s12",
++  "mode": "decoy",
++  "delay": 2,
++  "seed": 12,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d2_s13.json b/configs/main/main_decoy_d2_s13.json
+new file mode 100644
+index 0000000..9f1ed9e
+--- /dev/null
++++ b/configs/main/main_decoy_d2_s13.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d2_s13",
++  "mode": "decoy",
++  "delay": 2,
++  "seed": 13,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d2_s14.json b/configs/main/main_decoy_d2_s14.json
+new file mode 100644
+index 0000000..b5d5c18
+--- /dev/null
++++ b/configs/main/main_decoy_d2_s14.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d2_s14",
++  "mode": "decoy",
++  "delay": 2,
++  "seed": 14,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d2_s15.json b/configs/main/main_decoy_d2_s15.json
+new file mode 100644
+index 0000000..b5e938b
+--- /dev/null
++++ b/configs/main/main_decoy_d2_s15.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d2_s15",
++  "mode": "decoy",
++  "delay": 2,
++  "seed": 15,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d2_s16.json b/configs/main/main_decoy_d2_s16.json
+new file mode 100644
+index 0000000..6b8448e
+--- /dev/null
++++ b/configs/main/main_decoy_d2_s16.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d2_s16",
++  "mode": "decoy",
++  "delay": 2,
++  "seed": 16,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d2_s17.json b/configs/main/main_decoy_d2_s17.json
+new file mode 100644
+index 0000000..5ce9991
+--- /dev/null
++++ b/configs/main/main_decoy_d2_s17.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d2_s17",
++  "mode": "decoy",
++  "delay": 2,
++  "seed": 17,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d3_s10.json b/configs/main/main_decoy_d3_s10.json
+new file mode 100644
+index 0000000..03edebc
+--- /dev/null
++++ b/configs/main/main_decoy_d3_s10.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d3_s10",
++  "mode": "decoy",
++  "delay": 3,
++  "seed": 10,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d3_s11.json b/configs/main/main_decoy_d3_s11.json
+new file mode 100644
+index 0000000..1fe0767
+--- /dev/null
++++ b/configs/main/main_decoy_d3_s11.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d3_s11",
++  "mode": "decoy",
++  "delay": 3,
++  "seed": 11,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d3_s12.json b/configs/main/main_decoy_d3_s12.json
+new file mode 100644
+index 0000000..b6ae627
+--- /dev/null
++++ b/configs/main/main_decoy_d3_s12.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d3_s12",
++  "mode": "decoy",
++  "delay": 3,
++  "seed": 12,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d3_s13.json b/configs/main/main_decoy_d3_s13.json
+new file mode 100644
+index 0000000..ec3ad30
+--- /dev/null
++++ b/configs/main/main_decoy_d3_s13.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d3_s13",
++  "mode": "decoy",
++  "delay": 3,
++  "seed": 13,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_decoy_d3_s14.json b/configs/main/main_decoy_d3_s14.json
+new file mode 100644
+index 0000000..237a6f1
+--- /dev/null
++++ b/configs/main/main_decoy_d3_s14.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_decoy_d3_s14",
++  "mode": "decoy",
++  "delay": 3,
++  "seed": 14,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d1_s10.json b/configs/main/main_history_d1_s10.json
+new file mode 100644
+index 0000000..51fa9b5
+--- /dev/null
++++ b/configs/main/main_history_d1_s10.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d1_s10",
++  "mode": "history",
++  "delay": 1,
++  "seed": 10,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d1_s11.json b/configs/main/main_history_d1_s11.json
+new file mode 100644
+index 0000000..c17b1db
+--- /dev/null
++++ b/configs/main/main_history_d1_s11.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d1_s11",
++  "mode": "history",
++  "delay": 1,
++  "seed": 11,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d1_s12.json b/configs/main/main_history_d1_s12.json
+new file mode 100644
+index 0000000..511b0a2
+--- /dev/null
++++ b/configs/main/main_history_d1_s12.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d1_s12",
++  "mode": "history",
++  "delay": 1,
++  "seed": 12,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d1_s13.json b/configs/main/main_history_d1_s13.json
+new file mode 100644
+index 0000000..1172eb1
+--- /dev/null
++++ b/configs/main/main_history_d1_s13.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d1_s13",
++  "mode": "history",
++  "delay": 1,
++  "seed": 13,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d1_s14.json b/configs/main/main_history_d1_s14.json
+new file mode 100644
+index 0000000..31cdbdc
+--- /dev/null
++++ b/configs/main/main_history_d1_s14.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d1_s14",
++  "mode": "history",
++  "delay": 1,
++  "seed": 14,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d2_s10.json b/configs/main/main_history_d2_s10.json
+new file mode 100644
+index 0000000..7b407d7
+--- /dev/null
++++ b/configs/main/main_history_d2_s10.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d2_s10",
++  "mode": "history",
++  "delay": 2,
++  "seed": 10,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d2_s11.json b/configs/main/main_history_d2_s11.json
+new file mode 100644
+index 0000000..25d72ca
+--- /dev/null
++++ b/configs/main/main_history_d2_s11.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d2_s11",
++  "mode": "history",
++  "delay": 2,
++  "seed": 11,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d2_s12.json b/configs/main/main_history_d2_s12.json
+new file mode 100644
+index 0000000..3863105
+--- /dev/null
++++ b/configs/main/main_history_d2_s12.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d2_s12",
++  "mode": "history",
++  "delay": 2,
++  "seed": 12,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d2_s13.json b/configs/main/main_history_d2_s13.json
+new file mode 100644
+index 0000000..bc63391
+--- /dev/null
++++ b/configs/main/main_history_d2_s13.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d2_s13",
++  "mode": "history",
++  "delay": 2,
++  "seed": 13,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d2_s14.json b/configs/main/main_history_d2_s14.json
+new file mode 100644
+index 0000000..582410e
+--- /dev/null
++++ b/configs/main/main_history_d2_s14.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d2_s14",
++  "mode": "history",
++  "delay": 2,
++  "seed": 14,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d2_s15.json b/configs/main/main_history_d2_s15.json
+new file mode 100644
+index 0000000..e60405b
+--- /dev/null
++++ b/configs/main/main_history_d2_s15.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d2_s15",
++  "mode": "history",
++  "delay": 2,
++  "seed": 15,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d2_s16.json b/configs/main/main_history_d2_s16.json
+new file mode 100644
+index 0000000..6eaba37
+--- /dev/null
++++ b/configs/main/main_history_d2_s16.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d2_s16",
++  "mode": "history",
++  "delay": 2,
++  "seed": 16,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d2_s17.json b/configs/main/main_history_d2_s17.json
+new file mode 100644
+index 0000000..ac3ee0e
+--- /dev/null
++++ b/configs/main/main_history_d2_s17.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d2_s17",
++  "mode": "history",
++  "delay": 2,
++  "seed": 17,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d3_s10.json b/configs/main/main_history_d3_s10.json
+new file mode 100644
+index 0000000..f328305
+--- /dev/null
++++ b/configs/main/main_history_d3_s10.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d3_s10",
++  "mode": "history",
++  "delay": 3,
++  "seed": 10,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d3_s11.json b/configs/main/main_history_d3_s11.json
+new file mode 100644
+index 0000000..7d39de7
+--- /dev/null
++++ b/configs/main/main_history_d3_s11.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d3_s11",
++  "mode": "history",
++  "delay": 3,
++  "seed": 11,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d3_s12.json b/configs/main/main_history_d3_s12.json
+new file mode 100644
+index 0000000..8a1b4b4
+--- /dev/null
++++ b/configs/main/main_history_d3_s12.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d3_s12",
++  "mode": "history",
++  "delay": 3,
++  "seed": 12,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d3_s13.json b/configs/main/main_history_d3_s13.json
+new file mode 100644
+index 0000000..9d04e2f
+--- /dev/null
++++ b/configs/main/main_history_d3_s13.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d3_s13",
++  "mode": "history",
++  "delay": 3,
++  "seed": 13,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_history_d3_s14.json b/configs/main/main_history_d3_s14.json
+new file mode 100644
+index 0000000..61572ac
+--- /dev/null
++++ b/configs/main/main_history_d3_s14.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_history_d3_s14",
++  "mode": "history",
++  "delay": 3,
++  "seed": 14,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_repo_d0_s10.json b/configs/main/main_repo_d0_s10.json
+new file mode 100644
+index 0000000..b801165
+--- /dev/null
++++ b/configs/main/main_repo_d0_s10.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_repo_d0_s10",
++  "mode": "repo",
++  "delay": 0,
++  "seed": 10,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_repo_d0_s11.json b/configs/main/main_repo_d0_s11.json
+new file mode 100644
+index 0000000..3a7dee8
+--- /dev/null
++++ b/configs/main/main_repo_d0_s11.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_repo_d0_s11",
++  "mode": "repo",
++  "delay": 0,
++  "seed": 11,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_repo_d0_s12.json b/configs/main/main_repo_d0_s12.json
+new file mode 100644
+index 0000000..c241509
+--- /dev/null
++++ b/configs/main/main_repo_d0_s12.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_repo_d0_s12",
++  "mode": "repo",
++  "delay": 0,
++  "seed": 12,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_repo_d0_s13.json b/configs/main/main_repo_d0_s13.json
+new file mode 100644
+index 0000000..23a63e5
+--- /dev/null
++++ b/configs/main/main_repo_d0_s13.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_repo_d0_s13",
++  "mode": "repo",
++  "delay": 0,
++  "seed": 13,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_repo_d0_s14.json b/configs/main/main_repo_d0_s14.json
+new file mode 100644
+index 0000000..0e56157
+--- /dev/null
++++ b/configs/main/main_repo_d0_s14.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_repo_d0_s14",
++  "mode": "repo",
++  "delay": 0,
++  "seed": 14,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d0_s10.json b/configs/main/main_state_d0_s10.json
+new file mode 100644
+index 0000000..688f1ef
+--- /dev/null
++++ b/configs/main/main_state_d0_s10.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d0_s10",
++  "mode": "state",
++  "delay": 0,
++  "seed": 10,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d0_s11.json b/configs/main/main_state_d0_s11.json
+new file mode 100644
+index 0000000..abaf356
+--- /dev/null
++++ b/configs/main/main_state_d0_s11.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d0_s11",
++  "mode": "state",
++  "delay": 0,
++  "seed": 11,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d0_s12.json b/configs/main/main_state_d0_s12.json
+new file mode 100644
+index 0000000..d8fd8ba
+--- /dev/null
++++ b/configs/main/main_state_d0_s12.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d0_s12",
++  "mode": "state",
++  "delay": 0,
++  "seed": 12,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d0_s13.json b/configs/main/main_state_d0_s13.json
+new file mode 100644
+index 0000000..340ebe2
+--- /dev/null
++++ b/configs/main/main_state_d0_s13.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d0_s13",
++  "mode": "state",
++  "delay": 0,
++  "seed": 13,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d0_s14.json b/configs/main/main_state_d0_s14.json
+new file mode 100644
+index 0000000..8e7f846
+--- /dev/null
++++ b/configs/main/main_state_d0_s14.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d0_s14",
++  "mode": "state",
++  "delay": 0,
++  "seed": 14,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d1_s10.json b/configs/main/main_state_d1_s10.json
+new file mode 100644
+index 0000000..5a8201b
+--- /dev/null
++++ b/configs/main/main_state_d1_s10.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d1_s10",
++  "mode": "state",
++  "delay": 1,
++  "seed": 10,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d1_s11.json b/configs/main/main_state_d1_s11.json
+new file mode 100644
+index 0000000..c8ee246
+--- /dev/null
++++ b/configs/main/main_state_d1_s11.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d1_s11",
++  "mode": "state",
++  "delay": 1,
++  "seed": 11,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d1_s12.json b/configs/main/main_state_d1_s12.json
+new file mode 100644
+index 0000000..a1a4dc0
+--- /dev/null
++++ b/configs/main/main_state_d1_s12.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d1_s12",
++  "mode": "state",
++  "delay": 1,
++  "seed": 12,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d1_s13.json b/configs/main/main_state_d1_s13.json
+new file mode 100644
+index 0000000..df103a8
+--- /dev/null
++++ b/configs/main/main_state_d1_s13.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d1_s13",
++  "mode": "state",
++  "delay": 1,
++  "seed": 13,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d1_s14.json b/configs/main/main_state_d1_s14.json
+new file mode 100644
+index 0000000..bb8bae7
+--- /dev/null
++++ b/configs/main/main_state_d1_s14.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d1_s14",
++  "mode": "state",
++  "delay": 1,
++  "seed": 14,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d2_s10.json b/configs/main/main_state_d2_s10.json
+new file mode 100644
+index 0000000..f3ca416
+--- /dev/null
++++ b/configs/main/main_state_d2_s10.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d2_s10",
++  "mode": "state",
++  "delay": 2,
++  "seed": 10,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d2_s11.json b/configs/main/main_state_d2_s11.json
+new file mode 100644
+index 0000000..723f015
+--- /dev/null
++++ b/configs/main/main_state_d2_s11.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d2_s11",
++  "mode": "state",
++  "delay": 2,
++  "seed": 11,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d2_s12.json b/configs/main/main_state_d2_s12.json
+new file mode 100644
+index 0000000..6a223b0
+--- /dev/null
++++ b/configs/main/main_state_d2_s12.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d2_s12",
++  "mode": "state",
++  "delay": 2,
++  "seed": 12,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d2_s13.json b/configs/main/main_state_d2_s13.json
+new file mode 100644
+index 0000000..d699ed3
+--- /dev/null
++++ b/configs/main/main_state_d2_s13.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d2_s13",
++  "mode": "state",
++  "delay": 2,
++  "seed": 13,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d2_s14.json b/configs/main/main_state_d2_s14.json
+new file mode 100644
+index 0000000..abd8da8
+--- /dev/null
++++ b/configs/main/main_state_d2_s14.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d2_s14",
++  "mode": "state",
++  "delay": 2,
++  "seed": 14,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d2_s15.json b/configs/main/main_state_d2_s15.json
+new file mode 100644
+index 0000000..c595d98
+--- /dev/null
++++ b/configs/main/main_state_d2_s15.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d2_s15",
++  "mode": "state",
++  "delay": 2,
++  "seed": 15,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d2_s16.json b/configs/main/main_state_d2_s16.json
+new file mode 100644
+index 0000000..0450dc0
+--- /dev/null
++++ b/configs/main/main_state_d2_s16.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d2_s16",
++  "mode": "state",
++  "delay": 2,
++  "seed": 16,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d2_s17.json b/configs/main/main_state_d2_s17.json
+new file mode 100644
+index 0000000..f62c699
+--- /dev/null
++++ b/configs/main/main_state_d2_s17.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d2_s17",
++  "mode": "state",
++  "delay": 2,
++  "seed": 17,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d3_s10.json b/configs/main/main_state_d3_s10.json
+new file mode 100644
+index 0000000..e0400a4
+--- /dev/null
++++ b/configs/main/main_state_d3_s10.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d3_s10",
++  "mode": "state",
++  "delay": 3,
++  "seed": 10,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d3_s11.json b/configs/main/main_state_d3_s11.json
+new file mode 100644
+index 0000000..fa85c8c
+--- /dev/null
++++ b/configs/main/main_state_d3_s11.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d3_s11",
++  "mode": "state",
++  "delay": 3,
++  "seed": 11,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d3_s12.json b/configs/main/main_state_d3_s12.json
+new file mode 100644
+index 0000000..b196732
+--- /dev/null
++++ b/configs/main/main_state_d3_s12.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d3_s12",
++  "mode": "state",
++  "delay": 3,
++  "seed": 12,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d3_s13.json b/configs/main/main_state_d3_s13.json
+new file mode 100644
+index 0000000..33c7686
+--- /dev/null
++++ b/configs/main/main_state_d3_s13.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d3_s13",
++  "mode": "state",
++  "delay": 3,
++  "seed": 13,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/configs/main/main_state_d3_s14.json b/configs/main/main_state_d3_s14.json
+new file mode 100644
+index 0000000..a60a93f
+--- /dev/null
++++ b/configs/main/main_state_d3_s14.json
+@@ -0,0 +1,16 @@
++{
++  "id": "main_state_d3_s14",
++  "mode": "state",
++  "delay": 3,
++  "seed": 14,
++  "episodes": 500,
++  "train_freq": 1,
++  "eval_episodes": 50,
++  "eval_stale": [
++    0,
++    1,
++    2,
++    3,
++    4
++  ]
++}
+\ No newline at end of file
+diff --git a/evodm/evaluate.py b/evodm/evaluate.py
+new file mode 100644
+index 0000000..1eda077
+--- /dev/null
++++ b/evodm/evaluate.py
+@@ -0,0 +1,66 @@
++"""Greedy evaluation of a trained agent, with optional mismatched staleness (added for the
++delay-history study; see CHANGES.md).
++
++The evaluation runs the trained policy with no exploration and no learning on fresh episodes.
++For the delayed-observation modes the reading can be made staler or fresher than the agent was
++trained for (``stale``) while the network input keeps the shape it was trained with.
++"""
++import numpy as np
++
++from evodm.learner import practice
++
++
++def per_episode(agent):
++    """Mean fitness of each episode, from the agent's master memory."""
++    d = {}
++    for row in agent.master_memory:
++        d.setdefault(row[0], []).append(float(np.mean(row[-1])))
++    return np.array([np.mean(d[k]) for k in sorted(d)])
++
++
++def greedy_eval(agent, stale=None, episodes=100):
++    """Run a trained agent greedily (epsilon 0, no weight updates) for ``episodes`` episodes.
++
++    stale: real staleness of the reading during evaluation (delayed-observation modes only).
++           None keeps the staleness the agent was trained with.
++    Returns an array with the mean fitness of every evaluation episode (lower is better).
++    The agent's own settings are restored afterwards.
++    """
++    env = agent.env
++    saved = dict(episodes=agent.hp.EPISODES, epsilon=agent.hp.epsilon,
++                 memory=agent.master_memory, stale=getattr(env, "OBS_STALE", None))
++    try:
++        if stale is not None:
++            if not getattr(env, "OBS_MODE", False):
++                raise ValueError("stale can only be set in the delayed-observation modes")
++            env.OBS_STALE = int(stale)
++        agent.hp.EPISODES = int(episodes)
++        agent.master_memory = []
++        env.reset()  # rebuild the first observation under the chosen staleness
++        practice(agent, pre_trained=True)
++        return per_episode(agent)
++    finally:
++        agent.hp.EPISODES = saved["episodes"]
++        agent.hp.epsilon = saved["epsilon"]
++        agent.master_memory = saved["memory"]
++        if saved["stale"] is not None:
++            env.OBS_STALE = saved["stale"]
++        env.reset()
++
++
++def reference_eval(agent, kind, episodes=100):
++    """Evaluate a reference policy ('naive' = random drugs, 'dp' = exact optimum) on fresh episodes."""
++    saved_episodes, saved_memory = agent.hp.EPISODES, agent.master_memory
++    try:
++        agent.hp.EPISODES = int(episodes)
++        agent.master_memory = []
++        if kind == "naive":
++            practice(agent, naive=True)
++        elif kind == "dp":
++            practice(agent, dp_solution=True, discount_rate=agent.hp.DISCOUNT)
++        else:
++            raise ValueError("kind must be 'naive' or 'dp'")
++        return per_episode(agent)
++    finally:
++        agent.hp.EPISODES = saved_episodes
++        agent.master_memory = saved_memory
+diff --git a/evodm/evol_game.py b/evodm/evol_game.py
+index a60f677..b6d2364 100644
+--- a/evodm/evol_game.py
++++ b/evodm/evol_game.py
+@@ -47,7 +47,9 @@ class evol_env:
+         #                   uniformly random drugs (control: no real information)
+         self.OBS_MODES = ("delayed_state", "delayed_history", "delayed_decoy")
+         self.OBS_MODE = train_input in self.OBS_MODES
+-        self.OBS_DELAY = int(obs_delay)
++        self.OBS_DELAY = int(obs_delay)   # delay the agent was built for: sets the drug-window length
++        self.OBS_STALE = int(obs_delay)   # how stale the reading actually is; differs from OBS_DELAY only
++                                          # in the mismatched-delay evaluation (see evodm/evaluate.py)
+         #define environmental variables
+         self.update_target_counter = 0
+         self.time_step = 0 #define for number of evolutionary steps counter
+@@ -245,22 +247,27 @@ class evol_env:
+         """Observation the agent gets at decision time in the delayed-observation modes.
+ 
+         t actions have been taken so far, so the true state is s_t. The agent only sees the
+-        stale state s_(t-d) (clipped to s_0 early in an episode). For delayed_history it also
+-        sees the d actions a_(t-d+1) ... a_t taken since that reading, oldest first, as one-hot
+-        vectors, left-padded with zeros when fewer than d actions exist yet.
++        stale state s_(t-k) (clipped to s_0 early in an episode), where k = OBS_STALE is the
++        real staleness. For delayed_history it also sees the drugs given since that reading,
++        a_(t-k+1) ... a_t, oldest first, as one-hot vectors in a window of fixed length
++        W = OBS_DELAY (the delay the network was built for), left-padded with zeros. When
++        k == W (training, and matched evaluation) the window holds exactly the drugs given
++        since the reading. In the mismatched-delay evaluation k can differ from W: if k > W the
++        oldest k - W drugs fall outside the window; if k < W the window is left-padded with zeros.
+         """
+         t = len(self.action_hist)
+-        d = self.OBS_DELAY
+-        idx = max(0, t - d)
++        w = self.OBS_DELAY
++        idx = max(0, t - self.OBS_STALE)
+         parts = [self.state_hist[idx]]
+         if self.TRAIN_INPUT in ("delayed_history", "delayed_decoy"):
+-            slots = np.zeros((d, self.num_drugs))
++            slots = np.zeros((w, self.num_drugs))
++            n_real = min(t - idx, w)  # number of drugs that fit in the window
+             if self.TRAIN_INPUT == "delayed_history":
+-                recent = self.action_hist[idx:t]
++                recent = self.action_hist[idx:t][-n_real:] if n_real > 0 else []
+             else:  # decoy: random drugs, same count as the real window, no information
+-                recent = [random.randint(1, self.num_drugs) for _ in range(t - idx)]
+-            for k, a in enumerate(recent):
+-                slots[d - len(recent) + k, a - 1] = 1.0
++                recent = [random.randint(1, self.num_drugs) for _ in range(n_real)]
++            for j, a in enumerate(recent):
++                slots[w - len(recent) + j, a - 1] = 1.0
+             parts.append(slots.ravel())
+         return np.concatenate(parts).astype(float)
+ 
+diff --git a/evodm/test/test_mismatch_eval.py b/evodm/test/test_mismatch_eval.py
+new file mode 100644
+index 0000000..1cef7b1
+--- /dev/null
++++ b/evodm/test/test_mismatch_eval.py
+@@ -0,0 +1,116 @@
++"""Tests for the mismatched-staleness observation and the greedy evaluation."""
++import numpy as np
++import pytest
++from evodm import evol_env, define_mira_landscapes, evol_deepmind
++from evodm.evaluate import greedy_eval, reference_eval
++
++N, K = 4, 15
++
++
++def make_env(mode, w):
++    return evol_env(N=N, num_drugs=K, drugs=define_mira_landscapes(), train_input=mode,
++                    obs_delay=w, add_noise=False, normalize_drugs=False)
++
++
++def onehot(a):
++    v = np.zeros(K)
++    v[a - 1] = 1.0
++    return v
++
++
++def play(env, actions):
++    for a in actions:
++        env.action = a
++        env.step()
++
++
++def window(env):
++    return env.build_obs()[16:].reshape(-1, K)
++
++
++def test_default_staleness_equals_window_length():
++    env = make_env("delayed_history", 3)
++    assert env.OBS_STALE == env.OBS_DELAY == 3
++
++
++def test_staler_than_trained_drops_oldest_drugs():
++    env = make_env("delayed_history", 2)          # network built for a window of 2
++    play(env, [3, 5, 7, 9])                       # t = 4 actions taken
++    env.OBS_STALE = 3                             # reading is 3 steps old, window holds only 2
++    obs = env.build_obs()
++    assert np.allclose(obs[:16], env.state_hist[1])        # stale state s_1
++    w = window(env)
++    assert w.shape == (2, K)
++    assert np.allclose(w[0], onehot(7)) and np.allclose(w[1], onehot(9))  # a_3, a_4; a_2 (=5) dropped
++    assert obs.shape == env.ENVIRONMENT_SHAPE
++
++
++def test_fresher_than_trained_pads_with_zeros():
++    env = make_env("delayed_history", 3)
++    play(env, [3, 5, 7, 9])
++    env.OBS_STALE = 1                             # reading is only 1 step old
++    obs = env.build_obs()
++    assert np.allclose(obs[:16], env.state_hist[3])        # stale state s_3
++    w = window(env)
++    assert w.shape == (3, K)
++    assert np.allclose(w[0], 0) and np.allclose(w[1], 0) and np.allclose(w[2], onehot(9))
++
++
++def test_zero_staleness_has_empty_window():
++    env = make_env("delayed_history", 2)
++    play(env, [3, 5])
++    env.OBS_STALE = 0
++    obs = env.build_obs()
++    assert np.allclose(obs[:16], np.array(env.state_vector).ravel())
++    assert np.allclose(window(env), 0)
++
++
++def test_decoy_window_has_one_random_drug_per_real_slot():
++    env = make_env("delayed_decoy", 3)
++    play(env, [3, 5, 7])
++    env.OBS_STALE = 2
++    w = window(env)
++    assert w.sum() == 2 and (w.sum(axis=1) <= 1).all()
++
++
++def test_state_mode_shape_is_unchanged_by_staleness():
++    env = make_env("delayed_state", 2)
++    play(env, [3, 5, 7])
++    for k in range(5):
++        env.OBS_STALE = k
++        assert env.build_obs().shape == (16,)
++
++
++@pytest.fixture(scope="module")
++def trained():
++    return evol_deepmind(episodes=3, N=N, num_drugs=K, mira=True,
++                         train_input="delayed_history", obs_delay=2, train_freq=1)
++
++
++def test_greedy_eval_runs_and_restores_agent(trained):
++    agent = trained[2]
++    n_before, eps_before, mem_before = agent.hp.EPISODES, agent.hp.epsilon, len(agent.master_memory)
++    fit = greedy_eval(agent, stale=3, episodes=2)
++    assert fit.shape == (2,) and np.isfinite(fit).all() and (fit >= 0).all()
++    assert agent.hp.EPISODES == n_before and agent.hp.epsilon == eps_before
++    assert len(agent.master_memory) == mem_before and agent.env.OBS_STALE == 2
++
++
++def test_greedy_eval_does_not_change_weights(trained):
++    agent = trained[2]
++    before = [w.copy() for w in agent.model.get_weights()]
++    greedy_eval(agent, stale=1, episodes=2)
++    assert all(np.array_equal(a, b) for a, b in zip(before, agent.model.get_weights()))
++
++
++def test_stale_rejected_outside_delayed_modes():
++    out = evol_deepmind(episodes=2, N=N, num_drugs=K, mira=True, train_input="state_vector", train_freq=1)
++    with pytest.raises(ValueError):
++        greedy_eval(out[2], stale=2, episodes=1)
++
++
++def test_reference_policies_evaluate(trained):
++    naive = reference_eval(trained[3], "naive", episodes=2)
++    dp = reference_eval(trained[4], "dp", episodes=2)
++    assert naive.shape == (2,) and dp.shape == (2,)
++    assert dp.mean() <= naive.mean() + 0.3  # exact optimum is not worse than random beyond noise
+diff --git a/run_experiment.py b/run_experiment.py
+new file mode 100644
+index 0000000..800e3b0
+--- /dev/null
++++ b/run_experiment.py
+@@ -0,0 +1,102 @@
++"""Run one experiment from a configuration file.
++
++usage: python run_experiment.py configs/main/main_history_d2_s10.json [--force]
++
++Config keys: id, mode (repo | state | history | decoy), delay, seed, episodes, train_freq,
++eval_episodes, eval_stale (list; ignored for mode repo).
++
++Writes, under results/raw/:
++  <id>.csv          per-episode mean fitness during training (columns episode, RL, naive, DP)
++  <id>_eval.csv     greedy evaluation on fresh episodes (policy, test_stale, episode, fitness)
++  <id>_record.json  config, git commit, software versions, hardware, compute time, summary
++A run whose record already exists is skipped unless --force is given.
++"""
++import json, os, platform, random, subprocess, sys, time
++from datetime import datetime, timezone
++
++import numpy as np
++import pandas as pd
++import tensorflow as tf
++
++from evodm.exp import evol_deepmind
++from evodm.evaluate import per_episode, greedy_eval, reference_eval
++
++MODES = ("repo", "state", "history", "decoy")
++
++
++def git(*args):
++    try:
++        return subprocess.check_output(["git", *args], stderr=subprocess.DEVNULL).decode().strip()
++    except Exception:
++        return "unknown"
++
++
++def main(path, force=False):
++    cfg = json.load(open(path))
++    rid, mode = cfg["id"], cfg["mode"]
++    if mode not in MODES:
++        sys.exit("mode must be one of %s" % (MODES,))
++    out = "results/raw"
++    os.makedirs(out, exist_ok=True)
++    if os.path.exists(f"{out}/{rid}_record.json") and not force:
++        print("already done:", rid)
++        return
++
++    seed = int(cfg["seed"])
++    random.seed(seed); np.random.seed(seed); tf.random.set_seed(seed)
++    delay = int(cfg.get("delay", 0))
++    kw = dict(episodes=int(cfg["episodes"]), N=int(cfg.get("N", 4)),
++              num_drugs=int(cfg.get("num_drugs", 15)), mira=True,
++              train_freq=int(cfg["train_freq"]))
++    if mode == "repo":
++        kw.update(train_input="state_vector", delay=delay)
++    else:
++        kw.update(train_input="delayed_" + mode, obs_delay=delay, delay=0)
++
++    start = datetime.now(timezone.utc).isoformat(timespec="seconds")
++    t0 = time.time()
++    res = evol_deepmind(**kw)
++    agent, naive_agent, dp_agent = res[2], res[3], res[4]
++    train = {"RL": per_episode(agent), "naive": per_episode(naive_agent), "DP": per_episode(dp_agent)}
++    n = min(len(v) for v in train.values())
++    df = pd.DataFrame({k: v[:n] for k, v in train.items()})
++    df.index.name = "episode"
++    df.to_csv(f"{out}/{rid}.csv")
++    t_train = time.time() - t0
++
++    # greedy evaluation on fresh episodes (no exploration, no learning)
++    t1 = time.time()
++    n_eval = int(cfg.get("eval_episodes", 100))
++    rows = []
++    stales = [None] if mode == "repo" else list(cfg.get("eval_stale", [delay]))
++    for s in stales:
++        fit = greedy_eval(agent, stale=s, episodes=n_eval)
++        rows += [("RL", "train" if s is None else s, i, float(f)) for i, f in enumerate(fit)]
++    for name, ag, kind in (("naive", naive_agent, "naive"), ("DP", dp_agent, "dp")):
++        fit = reference_eval(ag, kind, episodes=n_eval)
++        rows += [(name, "NA", i, float(f)) for i, f in enumerate(fit)]
++    ev = pd.DataFrame(rows, columns=["policy", "test_stale", "episode", "fitness"])
++    ev.to_csv(f"{out}/{rid}_eval.csv", index=False)
++    t_eval = time.time() - t1
++
++    summary = {f"{p}_stale{s}": round(float(g.fitness.mean()), 4)
++               for (p, s), g in ev.groupby(["policy", "test_stale"])}
++    summary["train_last50_RL"] = round(float(df.RL.values[-50:].mean()), 4)
++    record = {
++        "id": rid, "config": cfg, "started_utc": start,
++        "seconds_train": round(t_train, 1), "seconds_eval": round(t_eval, 1),
++        "git_commit": git("rev-parse", "HEAD"),
++        "git_dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
++        "python": platform.python_version(), "tensorflow": tf.__version__,
++        "numpy": np.__version__, "pandas": pd.__version__,
++        "platform": platform.platform(), "machine": platform.machine(),
++        "cpu_count": os.cpu_count(), "summary": summary,
++    }
++    json.dump(record, open(f"{out}/{rid}_record.json", "w"), indent=2)
++    print(rid, summary, "train s:", record["seconds_train"], "eval s:", record["seconds_eval"])
++
++
++if __name__ == "__main__":
++    if len(sys.argv) < 2:
++        sys.exit(__doc__)
++    main(sys.argv[1], force="--force" in sys.argv)
+diff --git a/scripts/make_configs.py b/scripts/make_configs.py
+new file mode 100644
+index 0000000..427b5d7
+--- /dev/null
++++ b/scripts/make_configs.py
+@@ -0,0 +1,31 @@
++"""Write the configuration file for every experiment in the paper to configs/main/.
++
++Design (frozen before the main runs): Dense network, 500 episodes, train_freq=1, untuned
++hyperparameters identical for every condition. Seeds 10-14 for all conditions; seeds 15-17 are
++added for the delay-2 conditions only (decided in advance, not after seeing results).
++The repository's own agent (mode repo, Conv1D, no delay) is run at the same budget as the
++matched-budget reproduction.
++"""
++import json, os
++
++OUT = "configs/main"
++EPISODES, TRAIN_FREQ, EVAL_EPISODES, EVAL_STALE = 500, 1, 50, [0, 1, 2, 3, 4]
++os.makedirs(OUT, exist_ok=True)
++
++conditions = [("state", 0)]
++for d in (1, 2, 3):
++    conditions += [("state", d), ("history", d), ("decoy", d)]
++
++def write(mode, d, s):
++    rid = f"main_{mode}_d{d}_s{s}"
++    cfg = dict(id=rid, mode=mode, delay=d, seed=s, episodes=EPISODES, train_freq=TRAIN_FREQ,
++               eval_episodes=EVAL_EPISODES, eval_stale=EVAL_STALE)
++    json.dump(cfg, open(f"{OUT}/{rid}.json", "w"), indent=2)
++
++for mode, d in conditions:
++    seeds = range(10, 18) if d == 2 else range(10, 15)
++    for s in seeds:
++        write(mode, d, s)
++for s in range(10, 15):
++    write("repo", 0, s)
++print(len(os.listdir(OUT)), "config files in", OUT)
+diff --git a/scripts/run_all.sh b/scripts/run_all.sh
+new file mode 100755
+index 0000000..44e92cd
+--- /dev/null
++++ b/scripts/run_all.sh
+@@ -0,0 +1,10 @@
++#!/usr/bin/env bash
++# usage: scripts/run_all.sh [config_dir] [parallel_jobs]
++# Runs every config in the directory, 4 at a time by default. Finished runs are skipped,
++# so the script can be stopped and restarted. One log per run in logs/.
++dir=${1:-configs/main}
++jobs=${2:-4}
++mkdir -p logs
++# seed order, so an interrupted batch still has every condition at fewer seeds
++ls "$dir"/*.json | sed 's/.*_s\([0-9]*\)\.json$/\1 &/' | sort -n | cut -d" " -f2 | xargs -P "$jobs" -I{} sh -c 'python run_experiment.py {} > logs/$(basename {} .json).log 2>&1'
++echo ALL DONE
